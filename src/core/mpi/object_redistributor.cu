@@ -68,7 +68,7 @@ __global__ void getExitingObjects(const DomainInfo domain, OVview view, const Ob
     }
 }
 
-__global__ static void unpackObject(const char* from, const int startDstObjId, OVview view, ObjectPacker packer)
+__global__ static void unpackObject(const char *from, const int startDstObjId, OVview view, ObjectPacker packer)
 {
     const int objId = blockIdx.x;
     const int tid = threadIdx.x;
@@ -84,7 +84,7 @@ __global__ static void unpackObject(const char* from, const int startDstObjId, O
     srcAddr += view.objSize * packer.part.packedSize_byte;
     if (tid == 0) packer.obj.unpack(srcAddr, startDstObjId+objId);
 }
-}
+} // namespace ObjecRedistributorKernels
 
 //===============================================================================================
 // Member functions

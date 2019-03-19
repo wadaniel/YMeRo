@@ -75,6 +75,21 @@ void exportPlugins(py::module& m)
                 return py::array(dt, resolution, (float*)ch.data, py::cast(dumper));
             });
 
+    py::handlers_class<DensityControlPlugin>(m, "DensityControlPlugin", pysim, R"(
+        This plugin applies forces to a set of particle vectors in order to get a constant density.
+    )");
+
+    py::handlers_class<PostprocessDensityControl>(m, "PostprocessDensityControl", pypost, R"(
+        Dumps info from :any:`DensityControlPlugin`.
+    )");
+
+    py::handlers_class<DensityOutletPlugin>(m, "DensityOutletPlugin", pysim, R"(
+        This plugin removes particles from a set of :any:`ParticleVector` in a given region if the number density is larger than a given target.
+    )");
+
+    py::handlers_class<RateOutletPlugin>(m, "RateOutletPlugin", pysim, R"(
+        This plugin removes particles from a set of :any:`ParticleVector` in a given region at a given mass rate.
+    )");
     
     py::handlers_class<ExchangePVSFluxPlanePlugin>(m, "ExchangePVSFluxPlane", pysim, R"(
         This plugin exchanges particles from a particle vector crossing a given plane to another particle vector.
@@ -162,6 +177,13 @@ void exportPlugins(py::module& m)
         The data is dumped into hdf5 format. An additional xdfm file is dumped to describe the data and make it readable by visualization tools. 
     )");
 
+
+    py::handlers_class<ParticleDisplacementPlugin>(m, "ParticleDisplacementPlugin", pysim, R"(
+        This plugin computes and save the displacement of the particles within a given particle vector.
+        The result is stored inside the extra channel "displacements" as an array of float3.
+    )");
+
+    
     py::handlers_class<ParticleDumperPlugin>(m, "ParticleDumperPlugin", pypost, R"(
         Postprocess side plugin of :any:`ParticleSenderPlugin`.
         Responsible for performing the I/O.
@@ -195,6 +217,18 @@ void exportPlugins(py::module& m)
         Responsible for performing the I/O.
     )");
     
+
+    py::handlers_class<SimulationRadialVelocityControl>(m, "RadialVelocityControl", pysim, R"(
+        This plugin applies a radial force (decreasing as :math:`r^3`) to all the particles of the target PVS.
+        The force is adapted via a PID controller such that the average of the velocity times radial position of the particles matches a target value.
+    )");
+
+    py::handlers_class<PostprocessRadialVelocityControl>(m, "PostprocessRadialVelocityControl", pypost, R"(
+        Postprocess side plugin of :any:`RadialVelocityControl`.
+        Responsible for performing the I/O.
+    )");
+
+
     py::handlers_class<SimulationStats>(m, "SimulationStats", pysim, R"(
         This plugin will report aggregate quantities of all the particles in the simulation:
         total number of particles in the simulation, average temperature and momentum, maximum velocity magnutide of a particle
@@ -280,8 +314,9 @@ void exportPlugins(py::module& m)
     py::handlers_class<WallForceCollectorPlugin>(m, "WallForceCollector", pysim, R"(
         This plugin collects and average the total force exerted on a given wall.
         The result has 2 components:
-            - bounce back: force necessary to the momentum change
-            - frozen particles: total interaction force exerted on the frozen particles
+        
+            * bounce back: force necessary to the momentum change
+            * frozen particles: total interaction force exerted on the frozen particles
     )");
 
     py::handlers_class<WallForceDumperPlugin>(m, "WallForceDumper", pypost, R"(
@@ -313,6 +348,57 @@ void exportPlugins(py::module& m)
             torque: extra torque (per object)
     )");
 
+    m.def("__createDensityControl", &PluginFactory::createDensityControlPlugin, 
+          "compute_task"_a, "state"_a, "name"_a, "file_name"_a, "pvs"_a, "target_density"_a,
+          "region"_a, "resolution"_a, "level_lo"_a, "level_hi"_a, "level_space"_a,
+          "Kp"_a, "Ki"_a, "Kd"_a, "tune_every"_a, "dump_every"_a, "sample_every"_a, R"(
+        Create :any:`DensityControlPlugin`
+        
+        Args:
+            name: name of the plugin
+            file_name: output filename 
+            pvs: list of :any:`ParticleVector` that we'll work with
+            target_density: target number density (used only at boundaries of level sets)
+            region: a scalar field which describes how to subdivide the domain. 
+                    It must be continuous and differentiable, as the forces are in the gradient direction of this field
+            resolution: grid resolution to represent the region field
+            level_lo: lower level set to apply the controller on
+            level_hi: highest level set to apply the controller on
+            level_space: the size of one subregion in terms of level sets
+            Kp, Ki, Kd: pid control parameters
+            tune_every: update the forces every this amount of time steps
+            dump_every: dump densities and forces in file ``filename``
+            sample_every: sample to average densities every this amount of time steps
+    )");
+
+    m.def("__createDensityOutlet", &PluginFactory::createDensityOutletPlugin, 
+          "compute_task"_a, "state"_a, "name"_a, "pvs"_a, "number_density"_a,
+          "region"_a, "resolution"_a, R"(
+        Create :any:`DensityOutletPlugin`
+        
+        Args:
+            name: name of the plugin
+            pvs: list of :any:`ParticleVector` that we'll work with
+            number_density: maximum number_density in the region
+            region: a function that is negative in the concerned region and positive outside
+            resolution: grid resolution to represent the region field
+        
+    )");
+
+    m.def("__createRateOutlet", &PluginFactory::createRateOutletPlugin, 
+          "compute_task"_a, "state"_a, "name"_a, "pvs"_a, "mass_rate"_a,
+          "region"_a, "resolution"_a, R"(
+        Create :any:`RateOutletPlugin`
+        
+        Args:
+            name: name of the plugin
+            pvs: list of :any:`ParticleVector` that we'll work with
+            mass_rate: total outlet mass rate in the region
+            region: a function that is negative in the concerned region and positive outside
+            resolution: grid resolution to represent the region field
+        
+    )");
+    
     m.def("__createDumpAverage", &PluginFactory::createDumpAveragePlugin, 
           "compute_task"_a, "state"_a, "name"_a, "pvs"_a, "sample_every"_a, "dump_every"_a,
           "bin_size"_a = PyTypes::float3{1.0, 1.0, 1.0}, "channels"_a, "path"_a = "xdmf/", R"(
@@ -518,6 +604,16 @@ void exportPlugins(py::module& m)
             savedName: name of the extra channel
     )");
 
+    m.def("__createParticleDisplacement", &PluginFactory::createParticleDisplacementPlugin, 
+          "compute_task"_a, "state"_a, "name"_a, "pv"_a, "update_every"_a, R"(
+        Create :any:`ParticleDisplacementPlugin`
+        
+        Args:
+            name: name of the plugin
+            pv: :any:`ParticleVector` that we'll work with
+            update_every: displacements are computed between positions separated by this amount of timesteps
+    )");
+
     m.def("__createPinObject", &PluginFactory::createPinObjPlugin, 
           "compute_task"_a, "state"_a, "name"_a, "ov"_a, "dump_every"_a, "path"_a, "velocity"_a, "angular_velocity"_a, R"(
         Create :any:`PinObject` plugin
@@ -531,6 +627,24 @@ void exportPlugins(py::module& m)
                 If the corresponding component should not be restricted, set this value to :python:`PinObject::Unrestricted`
             angular_velocity: 3 floats, each component is the desired object angular velocity.
                 If the corresponding component should not be restricted, set this value to :python:`PinObject::Unrestricted`
+    )");
+
+    m.def("__createRadialVelocityControl", &PluginFactory::createRadialVelocityControlPlugin,
+          "compute_task"_a, "state"_a, "name"_a, "filename"_a, "pvs"_a, "minRadius"_a, "maxRadius"_a, 
+          "sample_every"_a, "tune_every"_a, "dump_every"_a, "center"_a, "target_vel"_a, "Kp"_a, "Ki"_a, "Kd"_a, R"(
+        Create :any:`VelocityControl` plugin
+        
+        Args:
+            name: name of the plugin
+            filename: dump file name 
+            pvs: list of concerned :class:`ParticleVector`
+            minRadius, maxRadius: only particles within this distance are considered 
+            sample_every: sample velocity every this many time-steps
+            tune_every: adapt the force every this many time-steps
+            dump_every: write files every this many time-steps
+            center: center of the radial coordinates
+            target_vel: the target mean velocity of the particles at :math:`r=1`
+            Kp, Ki, Kd: PID controller coefficients
     )");
 
     m.def("__createStats", &PluginFactory::createStatsPlugin,
@@ -554,7 +668,7 @@ void exportPlugins(py::module& m)
             keepVelocity: True for adding Maxwell distribution to the previous velocity; False to set the velocity to a Maxwell distribution.
     )");
 
-    m.def("__createVelocityControl", &PluginFactory::createSimulationVelocityControlPlugin,
+    m.def("__createVelocityControl", &PluginFactory::createVelocityControlPlugin,
           "compute_task"_a, "state"_a, "name"_a, "filename"_a, "pvs"_a, "low"_a, "high"_a,
           "sample_every"_a, "tune_every"_a, "dump_every"_a, "target_vel"_a, "Kp"_a, "Ki"_a, "Kd"_a, R"(
         Create :any:`VelocityControl` plugin

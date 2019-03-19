@@ -12,7 +12,103 @@ For more information, please refer to the online documentation: http://ymero.rea
 
 ## Changelog
 
-<!-- ### unreleased -->
+### v0.12.2
+
+* densities computed from pairwise interactions are now mass density
+* internal changes: 
+  * add fetcher with mass
+  * add type trait for self interacting pairwise kernels
+
+
+### v0.12.1
+
+* add support of SDPD/MDPD for objects
+* **fix** belonging checkers for halo objects: needed rigid motions
+* **fix** reverse exchanger data taken from halo for the extra data
+
+### v0.12.0
+
+* **fix** `ymero.restart()` will now indeed restart the simulation
+* **interface change** Renamed and moved parameter for MPI communicator in the ymero constructor
+* **interface change** Density interaction needs a density kernel
+* add SDPD interactions
+* add more density kernels
+* **docs**: add tutorials
+* **docs**: minor fixes
+* **internal**:
+  * tests are more robust to DPD noise
+  * proper rng per time step in DPD/MDPD 
+* add density outlet plugin
+* add rate outlet plugin
+* add experimental version of density control plugin
+
+### v0.11.5
+
+* support for RDMA communication
+* membrane fluctuation forces: use uniform distribution instead of gaussian so that it is bounded
+* membrane forces: more robust computation of Lim forces
+* internal changes: 
+  * simplify interface of interaction manager
+  * pairwise forces can contain only host memory variable and pass a separate handle to gpu
+  * pairwise interaction: compiled separately when template instances are created
+
+### v0.11.4
+
+* **fix** Lim shear forces bug: triangle invariant
+* **fix** reset accumulated quantities in Juelicher ADE model
+* **fix** check MPI send requests
+
+### v0.11.3
+
+* **fix** Juelicher bending  forces sign
+* **fix** Lim shear forces sign
+* add possibility to compute membrane forces in double perecision
+
+### v0.11.2
+
+* **fix** wall thickness is larger when using MDPD
+* internal changes:
+  * cell lists do not know about special channels
+  * add interaction manager to manage interaction channels
+
+### v0.11.1
+
+* **fix** bounce back on multiple nodes for objects
+* minor fixes in documentation
+
+### v0.11.0
+
+* add Lim model for shear forces on membranes
+* add corresponding tests
+
+### v0.10.7
+
+* **interface change** membrane interactions take only one constructor (see docs)
+* **fix** warp reductions: all threads participate
+* internal changes:
+  * cosmetic changes: more consistent namespace style
+  * membrane interaction takes a functor for dihedral computations
+  * refactor membrane interactions: take functors for shear and bending forces
+
+### v0.10.6
+
+* Internal change: add before cell list plugin task
+* **fix**: pvs exchanger plugin: new particles are now correctly redistributed
+* **fix**: velocity inlet plugin: new particles are now correctly redistributed
+* **fix**: communication of persistent data to empty pvs
+* **fix**: average plugin asynchronous message to postprocessing
+
+### v0.10.5
+
+* add displacement plugin
+* add radial velocity control plugin 
+* **fix** reordering of extra data in celllists
+* **fix** pvsExchanger plugin also copies persistent channels
+* add test for pvsExchanger
+* add test for displacement plugin
+* internal changes:
+  * packers can copy to another packer
+  * defaultStream in `core/utils/cuda_common.h`
 
 ### v0.10.4
 

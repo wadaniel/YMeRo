@@ -1,13 +1,13 @@
 #pragma once
 
-#include <plugins/interface.h>
+#include "interface.h"
+
 #include <core/containers.h>
 #include <core/domain.h>
 
 #include <vector>
 
 class ParticleVector;
-class CellList;
 
 class Average3D : public SimulationPlugin
 {
@@ -44,6 +44,7 @@ protected:
     int sampleEvery, dumpEvery;
     int3 resolution;
     float3 binSize;
+    int3 rank3D, nranks3D;
 
     DeviceBuffer<float>   density;
     PinnedBuffer<double>  accumulated_density;

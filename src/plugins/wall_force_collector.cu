@@ -1,4 +1,5 @@
 #include "wall_force_collector.h"
+#include "utils/simple_serializer.h"
 
 #include <core/datatypes.h>
 #include <core/pvs/particle_vector.h>
@@ -7,7 +8,6 @@
 #include <core/utils/cuda_common.h>
 #include <core/utils/kernel_launch.h>
 #include <core/walls/interface.h>
-#include <plugins/simple_serializer.h>
 
 namespace WallForceCollector
 {
@@ -22,11 +22,12 @@ __global__ void totalForce(PVview view, double3 *totalForce)
 
     f = warpReduce(f, [](float a, float b) { return a + b; });
 
-    if (tid % warpSize == 0)
+    if (__laneid() == 0)
         atomicAdd(totalForce, make_double3(f));
 }
-}
-    
+} //namespace WallForceCollector
+
+
 WallForceCollectorPlugin::WallForceCollectorPlugin(const YmrState *state, std::string name,
                                                    std::string wallName, std::string frozenPvName,
                                                    int sampleEvery, int dumpEvery) :

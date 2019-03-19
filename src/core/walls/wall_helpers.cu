@@ -1,85 +1,82 @@
-#include <curand_kernel.h>
-
 #include "wall_helpers.h"
 
+#include <core/celllist.h>
 #include <core/logger.h>
 #include <core/pvs/particle_vector.h>
 #include <core/pvs/views/pv.h>
 #include <core/utils/cuda_common.h>
-#include <core/celllist.h>
 #include <core/utils/kernel_launch.h>
+#include <core/walls/simple_stationary_wall.h>
 #include <core/xdmf/xdmf.h>
 
-#include <core/walls/simple_stationary_wall.h>
+#include <curand_kernel.h>
 
-static const cudaStream_t default_stream = 0;
-
-namespace wall_helpers_kernels
+namespace WallHelpersKernels
 {
-    __global__ void init_sdf(int n, float *sdfs, float val)
-    {
-        int i = blockIdx.x * blockDim.x + threadIdx.x;
-        if (i < n) sdfs[i] = val;
-    }
+__global__ void init_sdf(int n, float *sdfs, float val)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n) sdfs[i] = val;
+}
 
-    __global__ void merge_sdfs(int n, const float *sdfs, float *sdfs_merged)
-    {
-        int i = blockIdx.x * blockDim.x + threadIdx.x;
-        if (i < n) sdfs_merged[i] = max(sdfs[i], sdfs_merged[i]);
-    }
+__global__ void merge_sdfs(int n, const float *sdfs, float *sdfs_merged)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n) sdfs_merged[i] = max(sdfs[i], sdfs_merged[i]);
+}
 
-    template<bool QUERY>
-    __global__ void collectFrozen(PVview view, const float *sdfs, float minVal, float maxVal, float4* frozen, int* nFrozen)
-    {
-        const int pid = blockIdx.x * blockDim.x + threadIdx.x;
-        if (pid >= view.size) return;
+template<bool QUERY>
+__global__ void collectFrozen(PVview view, const float *sdfs, float minVal, float maxVal, float4* frozen, int* nFrozen)
+{
+    const int pid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (pid >= view.size) return;
 
-        Particle p(view.particles, pid);
-        p.u = make_float3(0);
+    Particle p(view.particles, pid);
+    p.u = make_float3(0);
 
-        const float val = sdfs[pid];
+    const float val = sdfs[pid];
         
-        if (val > minVal && val < maxVal)
-        {
-            const int ind = atomicAggInc(nFrozen);
-
-            if (!QUERY)
-                p.write2Float4(frozen, ind);
-        }
-    }
-
-    __global__ void initRandomPositions(int n, float3 *positions, long seed, float3 localSize)
+    if (val > minVal && val < maxVal)
     {
-        const int i = blockIdx.x * blockDim.x + threadIdx.x;
+        const int ind = atomicAggInc(nFrozen);
 
-        if (i >= n) return;
-        
-        curandState_t state;
-        float3 r;
-        
-        curand_init(seed, i, 0, &state);
-        
-        r.x = localSize.x * (curand_uniform(&state) - 0.5f);
-        r.y = localSize.y * (curand_uniform(&state) - 0.5f);
-        r.z = localSize.z * (curand_uniform(&state) - 0.5f);
-
-        positions[i] = r;
-    }
-
-    __global__ void countInside(int n, const float *sdf, int *nInside, float threshold = 0.f)
-    {
-        const int i = blockIdx.x * blockDim.x + threadIdx.x;
-        int myval = 0;
-
-        if (i < n)
-            myval = sdf[i] < threshold;
-
-        myval = warpReduce(myval, [] (int a, int b) {return a + b;});
-
-        if (threadIdx.x % warpSize == 0)
-            atomicAdd(nInside, myval);
+        if (!QUERY)
+            p.write2Float4(frozen, ind);
     }
 }
+
+__global__ void initRandomPositions(int n, float3 *positions, long seed, float3 localSize)
+{
+    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (i >= n) return;
+        
+    curandState_t state;
+    float3 r;
+        
+    curand_init(seed, i, 0, &state);
+        
+    r.x = localSize.x * (curand_uniform(&state) - 0.5f);
+    r.y = localSize.y * (curand_uniform(&state) - 0.5f);
+    r.z = localSize.z * (curand_uniform(&state) - 0.5f);
+
+    positions[i] = r;
+}
+
+__global__ void countInside(int n, const float *sdf, int *nInside, float threshold = 0.f)
+{
+    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    int myval = 0;
+
+    if (i < n)
+        myval = sdf[i] < threshold;
+
+    myval = warpReduce(myval, [] (int a, int b) {return a + b;});
+
+    if (__laneid() == 0)
+        atomicAdd(nInside, myval);
+}
+} // namespace WallHelpersKernels
 
 static void extract_particles(ParticleVector *pv, const float *sdfs, float minVal, float maxVal)
 {
@@ -89,26 +86,26 @@ static void extract_particles(ParticleVector *pv, const float *sdfs, float minVa
     const int nthreads = 128;
     const int nblocks = getNblocks(view.size, nthreads);
 
-    nFrozen.clear(default_stream);
+    nFrozen.clear(defaultStream);
 
-    SAFE_KERNEL_LAUNCH
-        (wall_helpers_kernels::collectFrozen<true>,
-         nblocks, nthreads, 0, default_stream,
-         view, sdfs, minVal, maxVal, nullptr, nFrozen.devPtr());
+    SAFE_KERNEL_LAUNCH(
+        WallHelpersKernels::collectFrozen<true>,
+        nblocks, nthreads, 0, defaultStream,
+        view, sdfs, minVal, maxVal, nullptr, nFrozen.devPtr());
 
-    nFrozen.downloadFromDevice(default_stream);
+    nFrozen.downloadFromDevice(defaultStream);
 
     PinnedBuffer<Particle> frozen(nFrozen[0]);
     info("Freezing %d particles", nFrozen[0]);
 
-    pv->local()->resize(nFrozen[0], default_stream);
+    pv->local()->resize(nFrozen[0], defaultStream);
 
-    nFrozen.clear(default_stream);
+    nFrozen.clear(defaultStream);
     
-    SAFE_KERNEL_LAUNCH
-        (wall_helpers_kernels::collectFrozen<false>,
-         nblocks, nthreads, 0, default_stream,
-         view, sdfs, minVal, maxVal, (float4*)frozen.devPtr(), nFrozen.devPtr());
+    SAFE_KERNEL_LAUNCH(
+        WallHelpersKernels::collectFrozen<false>,
+        nblocks, nthreads, 0, defaultStream,
+        view, sdfs, minVal, maxVal, (float4*)frozen.devPtr(), nFrozen.devPtr());
 
     CUDA_Check( cudaDeviceSynchronize() );
     std::swap(frozen, pv->local()->coosvels);
@@ -120,7 +117,7 @@ void freezeParticlesInWall(SDF_basedWall *wall, ParticleVector *pv, float minVal
 
     DeviceBuffer<float> sdfs(pv->local()->size());
     
-    wall->sdfPerParticle(pv->local(), &sdfs, nullptr, 0, default_stream);
+    wall->sdfPerParticle(pv->local(), &sdfs, nullptr, 0, defaultStream);
 
     extract_particles(pv, sdfs.devPtr(), minVal, maxVal);
 }
@@ -137,19 +134,19 @@ void freezeParticlesInWalls(std::vector<SDF_basedWall*> walls, ParticleVector *p
     const int nblocks = getNblocks(n, nthreads);
     const float safety = 1.f;
 
-    SAFE_KERNEL_LAUNCH
-        (wall_helpers_kernels::init_sdf,
-         nblocks, nthreads, 0, default_stream,
-         n, sdfs_merged.devPtr(), minVal - safety);
+    SAFE_KERNEL_LAUNCH(
+        WallHelpersKernels::init_sdf,
+        nblocks, nthreads, 0, defaultStream,
+        n, sdfs_merged.devPtr(), minVal - safety);
     
     
     for (auto& wall : walls) {
-        wall->sdfPerParticle(pv->local(), &sdfs, nullptr, 0, default_stream);
+        wall->sdfPerParticle(pv->local(), &sdfs, nullptr, 0, defaultStream);
 
-        SAFE_KERNEL_LAUNCH
-            (wall_helpers_kernels::merge_sdfs,
-             nblocks, nthreads, 0, default_stream,
-             n, sdfs.devPtr(), sdfs_merged.devPtr());
+        SAFE_KERNEL_LAUNCH(
+            WallHelpersKernels::merge_sdfs,
+            nblocks, nthreads, 0, defaultStream,
+            n, sdfs.devPtr(), sdfs_merged.devPtr());
     }
 
     extract_particles(pv, sdfs_merged.devPtr(), minVal, maxVal);
@@ -169,19 +166,19 @@ void dumpWalls2XDMF(std::vector<SDF_basedWall*> walls, float3 gridH, DomainInfo 
     const int nblocks = getNblocks(n, nthreads);
     const float initial = -1e5;
 
-    SAFE_KERNEL_LAUNCH
-        (wall_helpers_kernels::init_sdf,
-         nblocks, nthreads, 0, default_stream,
-         n, sdfs_merged.devPtr(), initial);
+    SAFE_KERNEL_LAUNCH(
+        WallHelpersKernels::init_sdf,
+        nblocks, nthreads, 0, defaultStream,
+        n, sdfs_merged.devPtr(), initial);
     
     for (auto& wall : walls)
     {
         wall->sdfOnGrid(gridH, &sdfs, 0);
 
-        SAFE_KERNEL_LAUNCH
-            (wall_helpers_kernels::merge_sdfs,
-             nblocks, nthreads, 0, default_stream,
-             n, sdfs.devPtr(), sdfs_merged.devPtr());
+        SAFE_KERNEL_LAUNCH(
+            WallHelpersKernels::merge_sdfs,
+            nblocks, nthreads, 0, defaultStream,
+            n, sdfs.devPtr(), sdfs_merged.devPtr());
     }
 
     sdfs_merged.downloadFromDevice(0);
@@ -203,33 +200,33 @@ double volumeInsideWalls(std::vector<SDF_basedWall*> walls, DomainInfo domain, M
     const int nblocks = getNblocks(n, nthreads);
     const float initial = -1e5;
 
-    SAFE_KERNEL_LAUNCH
-        (wall_helpers_kernels::initRandomPositions,
-         nblocks, nthreads, 0, default_stream,
-         n, positions.devPtr(), 424242, domain.localSize);
+    SAFE_KERNEL_LAUNCH(
+        WallHelpersKernels::initRandomPositions,
+        nblocks, nthreads, 0, defaultStream,
+        n, positions.devPtr(), 424242, domain.localSize);
 
-    SAFE_KERNEL_LAUNCH
-        (wall_helpers_kernels::init_sdf,
-         nblocks, nthreads, 0, default_stream,
-         n, sdfs_merged.devPtr(), initial);
+    SAFE_KERNEL_LAUNCH(
+        WallHelpersKernels::init_sdf,
+        nblocks, nthreads, 0, defaultStream,
+        n, sdfs_merged.devPtr(), initial);
         
     for (auto& wall : walls) {
-        wall->sdfPerPosition(&positions, &sdfs, default_stream);
+        wall->sdfPerPosition(&positions, &sdfs, defaultStream);
 
-        SAFE_KERNEL_LAUNCH
-            (wall_helpers_kernels::merge_sdfs,
-             nblocks, nthreads, 0, default_stream,
-             n, sdfs.devPtr(), sdfs_merged.devPtr());
+        SAFE_KERNEL_LAUNCH(
+            WallHelpersKernels::merge_sdfs,
+            nblocks, nthreads, 0, defaultStream,
+            n, sdfs.devPtr(), sdfs_merged.devPtr());
     }
 
-    nInside.clear(default_stream);
+    nInside.clear(defaultStream);
     
-    SAFE_KERNEL_LAUNCH
-        (wall_helpers_kernels::countInside,
-         nblocks, nthreads, 0, default_stream,
-         n, sdfs_merged.devPtr(), nInside.devPtr());
+    SAFE_KERNEL_LAUNCH(
+        WallHelpersKernels::countInside,
+        nblocks, nthreads, 0, defaultStream,
+        n, sdfs_merged.devPtr(), nInside.devPtr());
 
-    nInside.downloadFromDevice(default_stream, ContainersSynch::Synch);
+    nInside.downloadFromDevice(defaultStream, ContainersSynch::Synch);
 
     float3 localSize = domain.localSize;
     double subDomainVolume = localSize.x * localSize.y * localSize.z;

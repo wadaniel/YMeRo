@@ -1,11 +1,10 @@
 #include "dumpxyz.h"
-#include "simple_serializer.h"
-#include <core/utils/folders.h>
-
-#include <core/simulation.h>
-#include <core/pvs/particle_vector.h>
+#include "utils/simple_serializer.h"
 #include "utils/xyz.h"
 
+#include <core/pvs/particle_vector.h>
+#include <core/simulation.h>
+#include <core/utils/folders.h>
 
 XYZPlugin::XYZPlugin(const YmrState *state, std::string name, std::string pvName, int dumpEvery) :
     SimulationPlugin(state, name), pvName(pvName),
@@ -38,8 +37,8 @@ void XYZPlugin::serializeAndSend(cudaStream_t stream)
         p.r = state->domain.local2global(p.r);
 
     waitPrevSend();
-    SimpleSerializer::serialize(data, pv->name, downloaded);
-    send(data);
+    SimpleSerializer::serialize(sendBuffer, pv->name, downloaded);
+    send(sendBuffer);
 }
 
 //=================================================================================

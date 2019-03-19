@@ -8,7 +8,10 @@
 
 #include "restart_helpers.h"
 
-__global__ void min_max_com(OVview ovView)
+namespace ObjectVectorKernels
+{
+
+__global__ void minMaxCom(OVview ovView)
 {
     const int gid = threadIdx.x + blockDim.x * blockIdx.x;
     const int objId = gid >> 5;
@@ -39,6 +42,8 @@ __global__ void min_max_com(OVview ovView)
         ovView.comAndExtents[objId] = {mycom / ovView.objSize, mymin, mymax};
 }
 
+} // namespace ObjectVectorKernels
+
 void ObjectVector::findExtentAndCOM(cudaStream_t stream, ParticleVectorType type)
 {
     bool isLocal = (type == ParticleVectorType::Local);
@@ -56,7 +61,7 @@ void ObjectVector::findExtentAndCOM(cudaStream_t stream, ParticleVectorType type
     const int nthreads = 128;
     OVview ovView(this, lov);
     SAFE_KERNEL_LAUNCH(
-            min_max_com,
+            ObjectVectorKernels::minMaxCom,
             (ovView.nObjects*32 + nthreads-1)/nthreads, nthreads, 0, stream,
             ovView );
 }
@@ -100,12 +105,13 @@ std::vector<int> ObjectVector::_restartParticleData(MPI_Comm comm, std::string p
 
     XDMF::readParticleData(filename, comm, this, objSize);
 
-    std::vector<Particle> parts(local()->coosvels.begin(), local()->coosvels.end());
+    std::vector<Particle> parts(local()->size());
+    std::copy(local()->coosvels.begin(), local()->coosvels.end(), parts.begin());
     std::vector<int> map;
     
     _getRestartExchangeMap(comm, parts, map);
-    restart_helpers::exchangeData(comm, map, parts, objSize);    
-    restart_helpers::copyShiftCoordinates(state->domain, parts, local());
+    RestartHelpers::exchangeData(comm, map, parts, objSize);    
+    RestartHelpers::copyShiftCoordinates(state->domain, parts, local());
 
     local()->coosvels.uploadToDevice(0);
     
@@ -165,7 +171,7 @@ void ObjectVector::_checkpointObjectData(MPI_Comm comm, std::string path)
     
     XDMF::write(filename, &grid, channels, comm);
 
-    restart_helpers::make_symlink(comm, path, name + ".obj", filename);
+    RestartHelpers::make_symlink(comm, path, name + ".obj", filename);
 
     debug("Checkpoint for object vector '%s' successfully written", name.c_str());
 }
@@ -181,9 +187,10 @@ void ObjectVector::_restartObjectData(MPI_Comm comm, std::string path, const std
 
     auto loc_ids = local()->extraPerObject.getData<int>(ChannelNames::globalIds);
     
-    std::vector<int> ids(loc_ids->begin(), loc_ids->end());
+    std::vector<int> ids(loc_ids->size());
+    std::copy(loc_ids->begin(), loc_ids->end(), ids.begin());
     
-    restart_helpers::exchangeData(comm, map, ids, 1);
+    RestartHelpers::exchangeData(comm, map, ids, 1);
 
     loc_ids->resize_anew(ids.size());
     std::copy(ids.begin(), ids.end(), loc_ids->begin());

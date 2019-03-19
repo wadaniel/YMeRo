@@ -41,9 +41,9 @@ __global__ void getObjectHalos(const DomainInfo domain, const OVview view, const
         if (prop.high.y >  0.5f*domain.localSize.y - rc) dy = 1;
         if (prop.high.z >  0.5f*domain.localSize.z - rc) dz = 1;
 
-        for (int ix = min(dx, 0); ix <= max(dx, 0); ix++)
-            for (int iy = min(dy, 0); iy <= max(dy, 0); iy++)
-                for (int iz = min(dz, 0); iz <= max(dz, 0); iz++)
+        for (int ix = min(dx, 0); ix <= max(dx, 0); ++ix)
+            for (int iy = min(dy, 0); iy <= max(dy, 0); ++iy)
+                for (int iz = min(dz, 0); iz <= max(dz, 0); ++iz)
                 {
                     if (ix == 0 && iy == 0 && iz == 0) continue;
                     const int bufId = FragmentMapping::getId(ix, iy, iz);
@@ -55,7 +55,7 @@ __global__ void getObjectHalos(const DomainInfo domain, const OVview view, const
     // Copy objects to each halo
     // TODO: maybe other loop order?
     __shared__ int shDstObjId;
-    for (int i=0; i<nHalos; i++)
+    for (int i = 0; i < nHalos; ++i)
     {
         const int bufId = validHalos[i];
 
@@ -76,7 +76,7 @@ __global__ void getObjectHalos(const DomainInfo domain, const OVview view, const
             __syncthreads();
 
             int myOffset = dataWrap.offsets[bufId] + shDstObjId;
-            int* partIdsAddr = haloParticleIds + view.objSize * myOffset;
+            int *partIdsAddr = haloParticleIds + view.objSize * myOffset;
 
             // Save particle origins
             for (int pid = tid; pid < view.objSize; pid += blockDim.x)
@@ -114,7 +114,7 @@ __global__ static void unpackObject(const char *from, OVview view, ObjectPacker 
     srcAddr += view.objSize * packer.part.packedSize_byte;
     if (tid == 0) packer.obj.unpack(srcAddr, objId);
 }
-}
+} // namespace ObjectHaloExchangeKernels
 
 //===============================================================================================
 // Member functions
@@ -138,9 +138,7 @@ void ObjectHaloExchanger::attach(ObjectVector *ov, float rc, const std::vector<s
     origins.push_back(std::move(origin));
 
     packPredicates.push_back([extraChannelNames](const ExtraDataManager::NamedChannelDesc& namedDesc) {
-        bool needExchange = namedDesc.second->communication == ExtraDataManager::CommunicationMode::NeedExchange;
-        bool isRequired   = std::find(extraChannelNames.begin(), extraChannelNames.end(), namedDesc.first) != extraChannelNames.end();
-        return needExchange || isRequired;
+        return std::find(extraChannelNames.begin(), extraChannelNames.end(), namedDesc.first) != extraChannelNames.end();
     });
     
     info("Object vector %s (rc %f) was attached to halo exchanger", ov->name.c_str(), rc);
@@ -182,7 +180,7 @@ void ObjectHaloExchanger::prepareData(int id, cudaStream_t stream)
     auto origin = origins[id].get();
 
     debug2("Downloading %d halo objects of '%s'",
-           helper->sendOffsets[FragmentMapping::numFragments], ov->name.c_str());
+           helper->sendOffsets[helper->nBuffers], ov->name.c_str());
 
     OVview ovView(ov, ov->local());
     ObjectPacker packer(ov, ov->local(), packPredicates[id], stream);
@@ -220,6 +218,11 @@ void ObjectHaloExchanger::combineAndUploadData(int id, cudaStream_t stream)
             ObjectHaloExchangeKernels::unpackObject,
             totalRecvd, nthreads, 0, stream,
             helper->recvBuf.devPtr(), ovView, packer );
+}
+
+PinnedBuffer<int>& ObjectHaloExchanger::getSendOffsets(int id)
+{
+    return helpers[id]->sendOffsets;
 }
 
 PinnedBuffer<int>& ObjectHaloExchanger::getRecvOffsets(int id)

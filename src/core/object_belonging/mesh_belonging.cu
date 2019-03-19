@@ -9,6 +9,9 @@
 #include <core/rigid_kernels/quaternion.h>
 #include <core/rigid_kernels/rigid_motion.h>
 
+namespace MeshBelongingKernels
+{
+
 const float tolerance = 1e-6f;
 
 /// https://en.wikipedia.org/wiki/M%C3%B6ller%E2%80%93Trumbore_intersection_algorithm
@@ -57,8 +60,8 @@ __device__ BelongingTags oneParticleInsideMesh(int pid, float3 r, int objId, con
     r = r - com;
 
     // shoot 3 rays in different directions, count intersections
-    const int nRays = 3;
-    float3 rays[nRays] = { {0,1,0}, {0,1,0}, {0,1,0} };
+    constexpr int nRays = 3;
+    constexpr float3 rays[nRays] = { {0,1,0}, {0,1,0}, {0,1,0} };
     int counters[nRays] = {0, 0, 0};
 
     for (int i = __laneid(); i < mesh.ntriangles; i += warpSize)
@@ -72,15 +75,16 @@ __device__ BelongingTags oneParticleInsideMesh(int pid, float3 r, int objId, con
 //        if (threadIdx.x == 0 && blockIdx.x == 0)
 //            printf("%d  %f %f %f\n", trid, v0.x, v0.y, v0.z);
 
-        for (int c=0; c<nRays; c++)
-            if (doesRayIntersectTriangle(r, rays[c], v0, v1, v2)) counters[c]++;
+        for (int c = 0; c < nRays; c++)
+            if (doesRayIntersectTriangle(r, rays[c], v0, v1, v2))
+                counters[c]++;
     }
 
     // counter is odd if the particle is inside
     // however, floating-point precision sometimes yields in errors
     // so we choose what the majority(!) of the rays say
     int intersecting = 0;
-    for (int c=0; c<nRays; c++)
+    for (int c = 0; c < nRays; c++)
     {
         counters[c] = warpReduce(counters[c], [] (int a, int b) { return a+b; });
         if ( (counters[c] % 2) != 0 )
@@ -115,7 +119,7 @@ __global__ void insideMesh(const OVview ovView, const MeshView mesh, float4* ver
     const int3 span = cidHigh - cidLow + make_int3(1,1,1);
     const int totCells = span.x * span.y * span.z;
 
-    for (int i=locWid; i<totCells; i+=WARPS_PER_OBJ)
+    for (int i = locWid; i < totCells; i += WARPS_PER_OBJ)
     {
         const int3 cid3 = make_int3( i % span.x, (i/span.x) % span.y, i / (span.x*span.y) ) + cidLow;
         const int  cid = cinfo.encode(cid3);
@@ -138,6 +142,7 @@ __global__ void insideMesh(const OVview ovView, const MeshView mesh, float4* ver
     }
 }
 
+} // namespace MeshBelongingKernels
 
 void MeshBelongingChecker::tagInner(ParticleVector* pv, CellList* cl, cudaStream_t stream)
 {
@@ -161,7 +166,7 @@ void MeshBelongingChecker::tagInner(ParticleVector* pv, CellList* cl, cudaStream
           view.nObjects, ov->name.c_str(), pv->local()->size(), pv->name.c_str());
 
     SAFE_KERNEL_LAUNCH(
-            insideMesh<warpsPerObject>,
+            MeshBelongingKernels::insideMesh<warpsPerObject>,
             getNblocks(warpsPerObject*32*view.nObjects, nthreads), nthreads, 0, stream,
             view, meshView, (float4*)vertices->devPtr(), cl->cellInfo(), cl->getView<PVview>(), tags.devPtr());
 
@@ -175,7 +180,7 @@ void MeshBelongingChecker::tagInner(ParticleVector* pv, CellList* cl, cudaStream
           view.nObjects, ov->name.c_str(), pv->local()->size(), pv->name.c_str());
 
     SAFE_KERNEL_LAUNCH(
-            insideMesh<warpsPerObject>,
+            MeshBelongingKernels::insideMesh<warpsPerObject>,
             getNblocks(warpsPerObject*32*view.nObjects, nthreads), nthreads, 0, stream,
             view, meshView, (float4*)vertices->devPtr(), cl->cellInfo(), cl->getView<PVview>(), tags.devPtr());
 }

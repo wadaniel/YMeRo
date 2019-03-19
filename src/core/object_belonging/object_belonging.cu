@@ -93,6 +93,7 @@ void ObjectBelongingChecker_Common::splitByBelonging(ParticleVector* src, Partic
 
 
         info("New size of inner PV %s is %d", pvIn->name.c_str(), pvIn->local()->size());
+        pvIn->cellListStamp++;
     }
 
     if (pvOut != nullptr)
@@ -108,6 +109,7 @@ void ObjectBelongingChecker_Common::splitByBelonging(ParticleVector* src, Partic
 
 
         info("New size of outer PV %s is %d", pvOut->name.c_str(), pvOut->local()->size());
+        pvOut->cellListStamp++;
     }
 }
 
@@ -132,4 +134,19 @@ void ObjectBelongingChecker_Common::checkInner(ParticleVector* pv, CellList* cl,
 
     say("PV %s belonging check against OV %s: in/out/total  %d / %d / %d",
         pv->name.c_str(), ov->name.c_str(), nInside[0], nOutside[0], pv->local()->size());
+}
+
+void ObjectBelongingChecker_Common::setup(ObjectVector* ov)
+{
+    this->ov = ov;
+}
+
+std::vector<std::string> ObjectBelongingChecker_Common::getChannelsToBeExchanged() const
+{
+    return {ChannelNames::motions};
+}
+
+ObjectVector* ObjectBelongingChecker_Common::getObjectVector()
+{
+    return ov;
 }

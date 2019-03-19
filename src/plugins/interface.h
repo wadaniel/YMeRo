@@ -36,6 +36,7 @@ public:
     SimulationPlugin(const YmrState *state, std::string name);
     virtual ~SimulationPlugin();
 
+    virtual void beforeCellLists            (cudaStream_t stream);
     virtual void beforeForces               (cudaStream_t stream);
     virtual void beforeIntegration          (cudaStream_t stream);
     virtual void afterIntegration           (cudaStream_t stream);
@@ -45,13 +46,12 @@ public:
 
     virtual bool needPostproc() = 0;
 
-    virtual void setup(Simulation* simulation, const MPI_Comm& comm, const MPI_Comm& interComm);
+    virtual void setup(Simulation *simulation, const MPI_Comm& comm, const MPI_Comm& interComm);
     virtual void finalize();    
 
 protected:
     int localSendSize;
     MPI_Request sizeReq, dataReq;
-    Simulation *simulation;
 
     int _tag();
     

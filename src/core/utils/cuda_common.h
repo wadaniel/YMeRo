@@ -1,7 +1,10 @@
 #pragma once
 
-#include <tuple>
 #include "helper_math.h"
+
+#include <tuple>
+
+static const cudaStream_t defaultStream = 0;
 
 // shuffle instructions wrappers
 #if __CUDACC_VER_MAJOR__ >= 9
@@ -21,7 +24,7 @@
 #define warpShflDown(var, delta)   __shfl_down (var, delta)
 #define warpShflUp(var, delta)     __shfl_up   (var, delta)
 #define warpShflXor(var, laneMask) __shfl_xor  (var, laneMask)
-#define warpAll(predicate)     __all       (predicate)
+#define warpAll(predicate)         __all       (predicate)
 #define warpBallot(predicate)      __ballot    (predicate)
 
 #endif
@@ -168,7 +171,7 @@ __device__ inline  int warpReduce(int val, Operation op)
 }
 
 //=======================================================================================
-// per warp inclusive prefix sum
+// per warp prefix sum
 //=======================================================================================
 
 __device__ inline int warpInclusiveScan(int val) {
@@ -284,19 +287,19 @@ __device__ inline uint getLaneId();
 template<>
 __device__ inline uint getLaneId<1>()
 {
-    return threadIdx.x & 31;
+    return threadIdx.x & (warpSize-1);
 }
 
 template<>
 __device__ inline uint getLaneId<2>()
 {
-    return ((threadIdx.y * blockDim.x) + threadIdx.x) & 31;
+    return ((threadIdx.y * blockDim.x) + threadIdx.x) & (warpSize-1);
 }
 
 template<>
 __device__ inline uint getLaneId<3>()
 {
-    return (threadIdx.z * (blockDim.x * blockDim.y) + (threadIdx.y * blockDim.x) + threadIdx.x) & 31;
+    return (threadIdx.z * (blockDim.x * blockDim.y) + (threadIdx.y * blockDim.x) + threadIdx.x) & (warpSize-1);
 }
 
 #if __CUDA_ARCH__ < 700

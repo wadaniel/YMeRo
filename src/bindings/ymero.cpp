@@ -27,54 +27,52 @@ void exportYmero(py::module& m)
     py::class_<YMeRo>(m, "ymero", R"(
         Main coordination class, should only be one instance at a time
     )")
-        .def(py::init< PyTypes::int3, PyTypes::float3, float, std::string, int, int, std::string, bool, bool >(),
-             py::return_value_policy::take_ownership,
-             "nranks"_a, "domain"_a, "dt"_a, "log_filename"_a="log", "debug_level"_a=3, "checkpoint_every"_a=0, 
-             "restart_folder"_a="restart/", "cuda_aware_mpi"_a=false, "no_splash"_a=false, R"(
-            Args:
-                nranks:
-                    number of MPI simulation tasks per axis: x,y,z. If postprocess is enabled, the same number of the postprocess tasks will be running
-                domain:
-                    size of the simulation domain in x,y,z. Periodic boundary conditions are applied at the domain boundaries.
-                    The domain will be split in equal chunks between the MPI ranks.
-                    The largest chunk size that a single MPI rank can have depends on the total number of particles,
-                    handlers and hardware, and is typically about :math:`120^3 - 200^3`.
-                dt:
-                    timestep of the simulation
-                log_filename:
-                    prefix of the log files that will be created. 
-                    Logging is implemented in the form of one file per MPI rank, so in the simulation folder NP files with names log_00000.log, log_00001.log, ... will be created, where NP is the total number of MPI ranks. 
-                    Each MPI task (including postprocess) writes messages about itself into his own log file, and the combined log may be created by merging all the individual ones and sorting with respect to time.
-                    If this parameter is set to 'stdout' or 'stderr' standard output or standard error streams will be used instead of the file, however, there is no guarantee that messages from different ranks are synchronized
-                debug_level:
-                    Debug level varies from 1 to 8:
-                    
-                       #. only report fatal errors
-                       #. report serious errors
-                       #. report warnings (this is the default level)
-                       #. report not critical information
-                       #. report some debug information
-                       #. report more debug
-                       #. report all the debug
-                       #. force flushing to the file after each message
+        .def(py::init( [] (PyTypes::int3 nranks, PyTypes::float3 domain, float dt,
+                           std::string log, int debuglvl, int checkpoint,
+                           std::string restart, bool cudaMPI, bool noSplash, long comm) {
+
+                if (comm == 0) return std::make_unique<YMeRo> (      nranks, domain, dt, log, debuglvl, checkpoint, restart, cudaMPI, noSplash);
+                else           return std::make_unique<YMeRo> (comm, nranks, domain, dt, log, debuglvl, checkpoint, restart, cudaMPI, noSplash);
+            } ),
+            py::return_value_policy::take_ownership,
+            "nranks"_a, "domain"_a, "dt"_a, "log_filename"_a="log", "debug_level"_a=3, "checkpoint_every"_a=0,
+            "restart_folder"_a="restart/", "cuda_aware_mpi"_a=false, "no_splash"_a=false, "comm_ptr"_a=0, R"(
+                Create the YMeRo coordinator.
+                
+                .. warning::
+                    Debug level determines the amount of output produced by each of the simulation processes:
+
+					#. only report fatal errors
+					#. report serious errors
+					#. report warnings (this is the default level)
+					#. report not critical information
+					#. report some debug information
+					#. report more debug
+					#. report all the debug
+					#. force flushing to the file after each message
                     
                     Debug levels above 4 or 5 may significanlty increase the runtime, they are only recommended to debug errors.
                     Flushing increases the runtime yet more, but it is required in order not to lose any messages in case of abnormal program abort.
-                checkpoint_every:
-                    save state of the simulation components (particle vectors and handlers like integrators, plugins, etc.)
-                restart_folder:
-                    folder where the checkpoint files will reside
-                cuda_aware_mpi: enable CUDA Aware MPI (GPU RDMA). As of now it may crash, or may yield slower execution.
-                no_splash: Don't display the splash screen when at the start-up.
                 
-        )")
-
-        .def(py::init< long, PyTypes::int3, PyTypes::float3, float, std::string, int, int, std::string, bool >(),
-             py::return_value_policy::take_ownership,
-             "commPtr"_a, "nranks"_a, "domain"_a, "dt"_a, "log_filename"_a="log", "debug_level"_a=3, 
-             "checkpoint_every"_a=0, "restart_folder"_a="restart/", "cuda_aware_mpi"_a=false, R"(
-            Args:
-                commPtr: pointer to communicator
+                Args:
+                    nranks: number of MPI simulation tasks per axis: x,y,z. If postprocess is enabled, the same number of the postprocess tasks will be running
+                    domain: size of the simulation domain in x,y,z. Periodic boundary conditions are applied at the domain boundaries. The domain will be split in equal chunks between the MPI ranks.
+                        The largest chunk size that a single MPI rank can have depends on the total number of particles,
+                        handlers and hardware, and is typically about :math:`120^3 - 200^3`.
+                    dt: timestep of the simulation
+                    log_filename: prefix of the log files that will be created. 
+                        Logging is implemented in the form of one file per MPI rank, so in the simulation folder NP files with names log_00000.log, log_00001.log, ... 
+                        will be created, where NP is the total number of MPI ranks. 
+                        Each MPI task (including postprocess) writes messages about itself into his own log file, and the combined log may be created by merging all
+                        the individual ones and sorting with respect to time.
+                        If this parameter is set to 'stdout' or 'stderr' standard output or standard error streams will be used instead of the file, however, 
+                        there is no guarantee that messages from different ranks are synchronized
+                    debug_level: Debug level from 1 to 8, see above.
+                    checkpoint_every: save state of the simulation components (particle vectors and handlers like integrators, plugins, etc.)
+                    restart_folder: folder where the checkpoint files will reside
+                    cuda_aware_mpi: enable CUDA Aware MPI. The MPI library must support that feature, otherwise it may fail.
+                    no_splash: don't display the splash screen when at the start-up.
+                    comm_ptr: pointer to communicator. By default MPI_COMM_WORLD will be used
         )")
         
         .def("registerParticleVector", &YMeRo::registerParticleVector,
@@ -85,7 +83,9 @@ void exportYmero(py::module& m)
                 pv: :any:`ParticleVector`
                 ic: :class:`~libymero.InitialConditions.InitialConditions` that will generate the initial distibution of the particles
                 checkpoint_every:
-                    every that many timesteps the state of the Particle Vector across all the MPI processes will be saved to disk  into the ./restart/ folder. The checkpoint files may be used to restart the whole simulation or only some individual PVs from the saved states. Default value of 0 means no checkpoint.
+                    every that many timesteps the state of the Particle Vector across all the MPI processes will be saved to disk  into the ./restart/ folder. 
+                    The checkpoint files may be used to restart the whole simulation or only some individual PVs from the saved states. 
+                    Default value of 0 means no checkpoint.
         )")
         .def("registerIntegrator",             &YMeRo::registerIntegrator,             "Register Integrator")
         .def("registerInteraction",            &YMeRo::registerInteraction,            "Register Interaction")
@@ -105,7 +105,13 @@ void exportYmero(py::module& m)
         .def("setIntegrator",  &YMeRo::setIntegrator,  "Set Integrator")
         .def("setInteraction", &YMeRo::setInteraction,
              "interaction"_a, "pv1"_a, "pv2"_a, R"(
-                Forces between two Particle Vectors (they can be the same) *name1* and *name2* will be computed according to the defined interaction.
+                Forces between two instances of :any:`ParticleVector` (they can be the same) will be computed according to the defined interaction.
+
+                Args:
+                    interaction: :any:`Interaction` to apply
+                    pv1: first :any:`ParticleVector`
+                    pv2: second :any:`ParticleVector`
+
         )")
         .def("setBouncer",     &YMeRo::setBouncer,     "Set Bouncer")
         .def("setWall",        &YMeRo::setWallBounce,  "Set Wall")
@@ -138,16 +144,12 @@ void exportYmero(py::module& m)
                 Args:
                     checker: instance of :any:`BelongingChecker`
                     pv: :any:`ParticleVector` that will be split (source PV) 
-                    inside:
-                        if specified and not "none", a new :any:`ParticleVector` with name **inside** will be returned, that will keep the inner particles of the source PV. If set to "none", None object will be returned. In any case, the source PV will only contain the outer particles
-                    outside:
-                        if specified and not "none", a new :any:`ParticleVector` with name **outside** will be returned, that will keep the outer particles of the source PV. If set to "none", None object will be returned. In any case, the source PV will only contain the inner particles
-                    correct_every:
-                        If greater than zero, perform correction every this many time-steps.                        
+                    inside: if specified and not "none", a new :any:`ParticleVector` with name **inside** will be returned, that will keep the inner particles of the source PV. If set to "none", None object will be returned. In any case, the source PV will only contain the outer particles
+                    outside: if specified and not "none", a new :any:`ParticleVector` with name **outside** will be returned, that will keep the outer particles of the source PV. If set to "none", None object will be returned. In any case, the source PV will only contain the inner particles
+                    correct_every: If greater than zero, perform correction every this many time-steps.                        
                         Correction will move e.g. *inner* particles of outer PV to the :inner PV
                         and viceversa. If one of the PVs was defined as "none", the 'wrong' particles will be just removed.
-                    checkpoint_every:
-                        every that many timesteps the state of the newly created :any:`ParticleVector` (if any) will be saved to disk into the ./restart/ folder. Default value of 0 means no checkpoint.
+                    checkpoint_every: every that many timesteps the state of the newly created :any:`ParticleVector` (if any) will be saved to disk into the ./restart/ folder. Default value of 0 means no checkpoint.
                             
                 Returns:
                     New :any:`ParticleVector` or None depending on **inside** and **outside** options
@@ -197,12 +199,34 @@ void exportYmero(py::module& m)
                     
         )")
         
-        .def("restart", &YMeRo::restart, "Restart the simulation")
+        .def("restart", &YMeRo::restart,
+             "folder"_a="restart/", R"(
+               Restart the simulation. This function should typically be called just before running the simulation.
+               It will read the state of all previously registered instances of :any:`ParticleVector`, :any:`Interaction`, etc.
+               If the folder contains no checkpoint file required for one of those, an error occur.
+               
+               .. warning::
+                  Certain :any:`Plugins` may not implement restarting mechanism and will not restart correctly.
+                  Please check the documentation for the plugins.
+
+               Args:
+                   folder: folder with the checkpoint files
+        )")
+
         .def("isComputeTask", &YMeRo::isComputeTask, "Returns whether current rank will do compute or postrprocess")
         .def("isMasterTask",  &YMeRo::isMasterTask,  "Returns whether current task is the very first one")
         .def("start_profiler", &YMeRo::startProfiler, "Tells nvprof to start recording timeline")
         .def("stop_profiler",  &YMeRo::stopProfiler,  "Tells nvprof to stop recording timeline")
-        .def("save_dependency_graph_graphml",  &YMeRo::saveDependencyGraph_GraphML,  R"(
-            Exports `GraphML <http://graphml.graphdrawing.org/>`_ file with task graph for the current simulation time-step)")
+        .def("save_dependency_graph_graphml",  &YMeRo::saveDependencyGraph_GraphML,
+             "fname"_a, "current"_a = true, R"(
+             Exports `GraphML <http://graphml.graphdrawing.org/>`_ file with task graph for the current simulation time-step
+             
+             Args:
+                 fname: the output filename (without extension)
+                 current: if True, save the current non empty tasks; else, save all tasks that can exist in a simulation
+             
+             .. warning::
+                 if current is set to True, this must be called **after** :py:meth:`_ymero.ymero.run`.
+         )")
         .def("run", &YMeRo::run, "Run the simulation");
 }

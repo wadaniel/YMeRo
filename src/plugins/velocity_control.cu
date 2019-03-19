@@ -1,5 +1,6 @@
 #include "velocity_control.h"
-#include <plugins/simple_serializer.h>
+#include "utils/simple_serializer.h"
+
 #include <core/datatypes.h>
 #include <core/pvs/particle_vector.h>
 #include <core/pvs/views/pv.h>
@@ -7,9 +8,10 @@
 #include <core/utils/cuda_common.h>
 #include <core/utils/kernel_launch.h>
 
-namespace velocity_control_kernels {
+namespace VelocityControlKernels
+{
 
-static __device__ bool is_inside(float3 r, float3 low, float3 high)
+inline __device__ bool is_inside(float3 r, float3 low, float3 high)
 {
     return
         low.x <= r.x && r.x <= high.x &&
@@ -33,22 +35,28 @@ __global__ void addForce(PVview view, DomainInfo domain, float3 low, float3 high
 __global__ void sumVelocity(PVview view, DomainInfo domain, float3 low, float3 high, float3 *totVel, int *nSamples)
 {
     int gid = blockIdx.x * blockDim.x + threadIdx.x;
-    if (gid >= view.size) return;
+    Particle p;
+    
+    p.u = make_float3(0.0f);
 
-    Particle p(view.particles, gid);
-    float3 gr = domain.local2global(p.r);
+    if (gid < view.size) {
 
-    if (is_inside(gr, low, high))
-        atomicAggInc(nSamples);
-    else
-        p.u = make_float3(0.0f);
+        p.read(view.particles, gid);
+        float3 gr = domain.local2global(p.r);
+
+        if (is_inside(gr, low, high))
+            atomicAggInc(nSamples);
+        else
+            p.u = make_float3(0.0f);
+    }
 
     float3 u = warpReduce(p.u, [](float a, float b) { return a+b; });
-    if (threadIdx.x % warpSize == 0 && dot(u, u) > 1e-8)
+    
+    if (__laneid() == 0 && dot(u, u) > 1e-8)
         atomicAdd(totVel, u);
 }
 
-}
+} // namespace VelocityControlKernels
 
 SimulationVelocityControl::SimulationVelocityControl(const YmrState *state, std::string name, std::vector<std::string> pvNames,
                                                      float3 low, float3 high,
@@ -85,7 +93,7 @@ void SimulationVelocityControl::beforeForces(cudaStream_t stream)
         const int nthreads = 128;
 
         SAFE_KERNEL_LAUNCH
-            (velocity_control_kernels::addForce,
+            (VelocityControlKernels::addForce,
              getNblocks(view.size, nthreads), nthreads, 0, stream,
              view, state->domain, low, high, force );
     }
@@ -96,7 +104,7 @@ void SimulationVelocityControl::sampleOnePv(ParticleVector *pv, cudaStream_t str
     const int nthreads = 128;
  
     SAFE_KERNEL_LAUNCH
-        (velocity_control_kernels::sumVelocity,
+        (VelocityControlKernels::sumVelocity,
          getNblocks(pvView.size, nthreads), nthreads, 0, stream,
          pvView, state->domain, low, high, totVel.devPtr(), nSamples.devPtr());
 }

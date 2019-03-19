@@ -1,17 +1,17 @@
 #include "pin_object.h"
+#include "utils/simple_serializer.h"
 
-#include <core/utils/kernel_launch.h>
 #include <core/pvs/object_vector.h>
 #include <core/pvs/rigid_object_vector.h>
 #include <core/pvs/views/rov.h>
+#include <core/rigid_kernels/quaternion.h>
 #include <core/simulation.h>
-
 #include <core/utils/cuda_common.h>
 #include <core/utils/cuda_rng.h>
-#include <core/rigid_kernels/quaternion.h>
+#include <core/utils/kernel_launch.h>
 
-#include "simple_serializer.h"
-#include "pin_object.h"
+namespace PinObjectKernels
+{
 
 __global__ void restrictVelocities(OVview view, float3 targetVelocity, float4* totForces)
 {
@@ -127,6 +127,7 @@ __global__ void restrictRigidMotion(ROVviewWithOldMotion view, float3 targetVelo
     view.motions[objId] = motion;
 }
 
+} // namespace PinObjectKernels::
 
 PinObjectPlugin::PinObjectPlugin(const YmrState *state, std::string name, std::string ovName, float3 translation, float3 rotation, int reportEvery) :
     SimulationPlugin(state, name),
@@ -186,7 +187,7 @@ void PinObjectPlugin::beforeIntegration(cudaStream_t stream)
         const int nthreads = 128;
         OVview view(ov, ov->local());
         SAFE_KERNEL_LAUNCH(
-                restrictVelocities,
+                PinObjectKernels::restrictVelocities,
                 view.nObjects, nthreads, 0, stream,
                 view, translation, forces.devPtr() );
     }
@@ -202,9 +203,9 @@ void PinObjectPlugin::afterIntegration(cudaStream_t stream)
         const int nthreads = 32;
         ROVviewWithOldMotion view(rov, rov->local());
         SAFE_KERNEL_LAUNCH(
-                restrictRigidMotion,
+                PinObjectKernels::restrictRigidMotion,
                 getNblocks(view.nObjects, nthreads), nthreads, 0, stream,
-                view, translation, rotation, simulation->getCurrentDt(),
+                view, translation, rotation, state->dt,
                 forces.devPtr(), torques.devPtr() );
     }
 }

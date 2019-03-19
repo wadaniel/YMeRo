@@ -1,5 +1,5 @@
 #include "dpd.h"
-#include "pairwise.h"
+#include "pairwise.impl.h"
 #include "pairwise_interactions/dpd.h"
 
 #include <core/celllist.h>
@@ -13,8 +13,8 @@ InteractionDPD::InteractionDPD(const YmrState *state, std::string name, float rc
     a(a), gamma(gamma), kbt(kbt), power(power)
 {
     if (allocateImpl) {
-        Pairwise_DPD dpd(rc, a, gamma, kbt, state->dt, power);
-        impl = std::make_unique<InteractionPair<Pairwise_DPD>> (state, name, rc, dpd);
+        PairwiseDPD dpd(rc, a, gamma, kbt, state->dt, power);
+        impl = std::make_unique<InteractionPair<PairwiseDPD>> (state, name, rc, dpd);
     }
 }
 
@@ -27,9 +27,11 @@ InteractionDPD::~InteractionDPD() = default;
 void InteractionDPD::setPrerequisites(ParticleVector *pv1, ParticleVector *pv2, CellList *cl1, CellList *cl2)
 {
     impl->setPrerequisites(pv1, pv2, cl1, cl2);
+}
 
-    cl1->setNeededForOutput();
-    cl2->setNeededForOutput();
+std::vector<Interaction::InteractionChannel> InteractionDPD::getFinalOutputChannels() const
+{
+    return impl->getFinalOutputChannels();
 }
 
 void InteractionDPD::local(ParticleVector *pv1, ParticleVector *pv2,
@@ -46,16 +48,16 @@ void InteractionDPD::halo(ParticleVector *pv1, ParticleVector *pv2,
     impl->halo(pv1, pv2, cl1, cl2, stream);
 }
 
-void InteractionDPD::setSpecificPair(ParticleVector* pv1, ParticleVector* pv2, 
-        float a, float gamma, float kbt, float power)
+void InteractionDPD::setSpecificPair(ParticleVector *pv1, ParticleVector *pv2, 
+                                     float a, float gamma, float kbt, float power)
 {
     if (a     == Default) a     = this->a;
     if (gamma == Default) gamma = this->gamma;
     if (kbt   == Default) kbt   = this->kbt;
     if (power == Default) power = this->power;
 
-    Pairwise_DPD dpd(this->rc, a, gamma, kbt, state->dt, power);
-    auto ptr = static_cast< InteractionPair<Pairwise_DPD>* >(impl.get());
+    PairwiseDPD dpd(this->rc, a, gamma, kbt, state->dt, power);
+    auto ptr = static_cast< InteractionPair<PairwiseDPD>* >(impl.get());
     
     ptr->setSpecificPair(pv1->name, pv2->name, dpd);
 }

@@ -1,5 +1,6 @@
 #include "stats.h"
-#include <plugins/simple_serializer.h>
+#include "utils/simple_serializer.h"
+
 #include <core/datatypes.h>
 #include <core/pvs/particle_vector.h>
 #include <core/pvs/views/pv.h>
@@ -7,25 +8,31 @@
 #include <core/utils/cuda_common.h>
 #include <core/utils/kernel_launch.h>
 
-namespace Stats
+namespace StatsKernels
 {
+using Stats::ReductionType;
+
 __global__ void totalMomentumEnergy(PVview view, ReductionType *momentum, ReductionType *energy, float* maxvel)
 {
-    const int tid = blockIdx.x * blockDim.x + threadIdx.x;
-    const int wid = tid % warpSize;
-    if (tid >= view.size) return;
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
 
-    const float3 vel = make_float3(view.particles[2*tid+1]);
+    float3 vel, myMomentum;
+    float myEnergy = 0.f, myMaxIvelI;
+    vel = myMomentum = make_float3(0.f);
 
-    float3 myMomentum = vel * view.mass;
-    float myEnergy = dot(vel, vel) * view.mass*0.5f;
-
+    if (tid < view.size)
+    {
+        vel        = make_float3(view.particles[2*tid+1]);
+        myMomentum = vel * view.mass;
+        myEnergy   = dot(vel, vel) * view.mass * 0.5f;
+    }
+    
     myMomentum = warpReduce(myMomentum, [](float a, float b) { return a+b; });
     myEnergy   = warpReduce(myEnergy,   [](float a, float b) { return a+b; });
+    
+    myMaxIvelI = warpReduce(length(vel), [](float a, float b) { return max(a, b); });
 
-    float myMaxIvelI = warpReduce(length(vel), [](float a, float b) { return max(a, b); });
-
-    if (wid == 0)
+    if (__laneid() == 0)
     {
         atomicAdd(momentum+0, (ReductionType)myMomentum.x);
         atomicAdd(momentum+1, (ReductionType)myMomentum.y);
@@ -35,7 +42,7 @@ __global__ void totalMomentumEnergy(PVview view, ReductionType *momentum, Reduct
         atomicMax((int*)maxvel, __float_as_int(myMaxIvelI));
     }
 }
-}
+} // namespace StatsKernels
     
 SimulationStats::SimulationStats(const YmrState *state, std::string name, int fetchEvery) :
     SimulationPlugin(state, name),
@@ -44,11 +51,17 @@ SimulationStats::SimulationStats(const YmrState *state, std::string name, int fe
     timer.start();
 }
 
+SimulationStats::~SimulationStats() = default;
+
+void SimulationStats::setup(Simulation *simulation, const MPI_Comm& comm, const MPI_Comm& interComm)
+{
+    SimulationPlugin::setup(simulation, comm, interComm);
+    pvs = simulation->getParticleVectors();
+}
+
 void SimulationStats::afterIntegration(cudaStream_t stream)
 {
     if (state->currentStep % fetchEvery != 0) return;
-
-    auto pvs = simulation->getParticleVectors();
 
     momentum.clear(stream);
     energy  .clear(stream);
@@ -60,7 +73,7 @@ void SimulationStats::afterIntegration(cudaStream_t stream)
         PVview view(pv, pv->local());
 
         SAFE_KERNEL_LAUNCH(
-                Stats::totalMomentumEnergy,
+                StatsKernels::totalMomentumEnergy,
                 getNblocks(view.size, 128), 128, 0, stream,
                 view, momentum.devPtr(), energy.devPtr(), maxvel.devPtr() );
 

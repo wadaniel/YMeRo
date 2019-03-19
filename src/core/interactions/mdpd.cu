@@ -1,6 +1,6 @@
 #include "mdpd.h"
-#include "pairwise.h"
-#include "pairwise_interactions/density.h"
+
+#include "pairwise.impl.h"
 #include "pairwise_interactions/mdpd.h"
 
 #include <core/celllist.h>
@@ -11,57 +11,13 @@
 #include <memory>
 
 
-
-InteractionDensity::InteractionDensity(const YmrState *state, std::string name, float rc) :
-    Interaction(state, name, rc)
-{
-    Pairwise_density density(rc);
-    impl = std::make_unique<InteractionPair<Pairwise_density>> (state, name, rc, density);
-}
-
-InteractionDensity::~InteractionDensity() = default;
-
-void InteractionDensity::setPrerequisites(ParticleVector *pv1, ParticleVector *pv2, CellList *cl1, CellList *cl2)
-{
-    impl->setPrerequisites(pv1, pv2, cl1, cl2);
-
-    pv1->requireDataPerParticle<float>(ChannelNames::densities, ExtraDataManager::CommunicationMode::None, ExtraDataManager::PersistenceMode::None);
-    pv2->requireDataPerParticle<float>(ChannelNames::densities, ExtraDataManager::CommunicationMode::None, ExtraDataManager::PersistenceMode::None);
-    
-    cl1->requireExtraDataPerParticle<float>(ChannelNames::densities, CellList::ExtraChannelRole::IntermediateOutput);
-    cl2->requireExtraDataPerParticle<float>(ChannelNames::densities, CellList::ExtraChannelRole::IntermediateOutput);
-    
-    cl1->setNeededForIntermediate();
-    cl2->setNeededForIntermediate();
-}
-
-bool InteractionDensity::outputsForces() const
-{
-    return false;
-}
-
-void InteractionDensity::local(ParticleVector *pv1, ParticleVector *pv2, CellList *cl1, CellList *cl2, cudaStream_t stream)
-{
-    impl->local(pv1, pv2, cl1, cl2, stream);
-}
-
-void InteractionDensity::halo (ParticleVector *pv1, ParticleVector *pv2, CellList *cl1, CellList *cl2, cudaStream_t stream)
-{
-    impl->halo(pv1, pv2, cl1, cl2, stream);
-}
-
-
-
-
-
-
 InteractionMDPD::InteractionMDPD(const YmrState *state, std::string name, float rc, float rd, float a, float b, float gamma, float kbt, float power, bool allocateImpl) :
     Interaction(state, name, rc),
     rd(rd), a(a), b(b), gamma(gamma), kbt(kbt), power(power)
 {
     if (allocateImpl) {
-        Pairwise_MDPD mdpd(rc, rd, a, b, gamma, kbt, state->dt, power);
-        impl = std::make_unique<InteractionPair<Pairwise_MDPD>> (state, name, rc, mdpd);
+        PairwiseMDPD mdpd(rc, rd, a, b, gamma, kbt, state->dt, power);
+        impl = std::make_unique<InteractionPair<PairwiseMDPD>> (state, name, rc, mdpd);
     }
 }
 
@@ -75,14 +31,21 @@ void InteractionMDPD::setPrerequisites(ParticleVector *pv1, ParticleVector *pv2,
 {
     impl->setPrerequisites(pv1, pv2, cl1, cl2);
 
-    pv1->requireDataPerParticle<float>(ChannelNames::densities, ExtraDataManager::CommunicationMode::None, ExtraDataManager::PersistenceMode::None);
-    pv2->requireDataPerParticle<float>(ChannelNames::densities, ExtraDataManager::CommunicationMode::None, ExtraDataManager::PersistenceMode::None);
+    pv1->requireDataPerParticle<float>(ChannelNames::densities, ExtraDataManager::PersistenceMode::None);
+    pv2->requireDataPerParticle<float>(ChannelNames::densities, ExtraDataManager::PersistenceMode::None);
     
-    cl1->requireExtraDataPerParticle<float>(ChannelNames::densities, CellList::ExtraChannelRole::IntermediateInput);
-    cl2->requireExtraDataPerParticle<float>(ChannelNames::densities, CellList::ExtraChannelRole::IntermediateInput);
+    cl1->requireExtraDataPerParticle<float>(ChannelNames::densities);
+    cl2->requireExtraDataPerParticle<float>(ChannelNames::densities);
+}
 
-    cl1->setNeededForOutput();
-    cl2->setNeededForOutput();
+std::vector<Interaction::InteractionChannel> InteractionMDPD::getIntermediateInputChannels() const
+{
+    return {{ChannelNames::densities, Interaction::alwaysActive}};
+}
+
+std::vector<Interaction::InteractionChannel> InteractionMDPD::getFinalOutputChannels() const
+{
+    return impl->getFinalOutputChannels();
 }
 
 void InteractionMDPD::local(ParticleVector *pv1, ParticleVector *pv2,
@@ -108,8 +71,8 @@ void InteractionMDPD::setSpecificPair(ParticleVector* pv1, ParticleVector* pv2,
     if (kbt   == Default) kbt   = this->kbt;
     if (power == Default) power = this->power;
 
-    Pairwise_MDPD mdpd(this->rc, this->rd, a, b, gamma, kbt, state->dt, power);
-    auto ptr = static_cast< InteractionPair<Pairwise_MDPD>* >(impl.get());
+    PairwiseMDPD mdpd(this->rc, this->rd, a, b, gamma, kbt, state->dt, power);
+    auto ptr = static_cast< InteractionPair<PairwiseMDPD>* >(impl.get());
     
     ptr->setSpecificPair(pv1->name, pv2->name, mdpd);
 }

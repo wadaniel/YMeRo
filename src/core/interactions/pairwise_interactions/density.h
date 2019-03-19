@@ -1,44 +1,54 @@
 #pragma once
 
+#include "density_kernels.h"
 #include "fetchers.h"
 
 #include <core/interactions/accumulators/density.h>
+#include <core/ymero_state.h>
 
 class CellList;
 class LocalParticleVector;
 
-class Pairwise_density : public ParticleFetcher
+template <typename DensityKernel>
+class PairwiseDensity : public ParticleFetcherWithMass
 {
 public:
 
     using ViewType     = PVviewWithDensities;
-    using ParticleType = Particle;
+    using ParticleType = ParticleFetcherWithMass::ParticleType;
+    using HandlerType  = PairwiseDensity;
     
-    Pairwise_density(float rc) :
-        ParticleFetcher(rc)
+    PairwiseDensity(float rc, DensityKernel densityKernel) :
+        ParticleFetcherWithMass(rc),
+        densityKernel(densityKernel)
     {
         invrc = 1.0 / rc;
-        fact = 15.0 / (2 * M_PI * rc2 * rc);
     }
-
-    void setup(LocalParticleVector *lpv1, LocalParticleVector *lpv2, CellList *cl1, CellList *cl2, float t)
-    {}
 
     __D__ inline float operator()(const ParticleType dst, int dstId, const ParticleType src, int srcId) const
     {
-        float3 dr = dst.r - src.r;
+        float3 dr = dst.p.r - src.p.r;
         float rij2 = dot(dr, dr);
         if (rij2 > rc2) return 0.0f;
 
         float rij = sqrtf(rij2);
-        float argwr = 1.0f - rij * invrc;
 
-        return fact * argwr * argwr;
+        return src.m * densityKernel(rij, invrc);
     }
 
     __D__ inline DensityAccumulator getZeroedAccumulator() const {return DensityAccumulator();}
 
+
+    const HandlerType& handler() const
+    {
+        return (const HandlerType&) (*this);
+    }
+    
+    void setup(LocalParticleVector *lpv1, LocalParticleVector *lpv2, CellList *cl1, CellList *cl2, const YmrState *state)
+    {}
+
 protected:
 
-    float invrc, fact;
+    float invrc;
+    DensityKernel densityKernel;
 };

@@ -1,9 +1,11 @@
 #pragma once
 
-#include <cuda_runtime.h>
-#include <mpi.h>
-
 #include "core/ymero_object.h"
+
+#include <cuda_runtime.h>
+#include <functional>
+#include <mpi.h>
+#include <vector>
 
 class CellList;
 class ParticleVector;
@@ -19,9 +21,6 @@ class ParticleVector;
 class Interaction : public YmrSimulationObject
 {
 public:
-    /// Cut-off raduis
-    float rc;
-
     Interaction(const YmrState *state, std::string name, float rc);
 
     virtual ~Interaction();
@@ -32,13 +31,6 @@ public:
      * Called from Simulation right after setup
      */
     virtual void setPrerequisites(ParticleVector *pv1, ParticleVector *pv2, CellList *cl1, CellList *cl2);
-
-    /**
-     * states wether the interaction outputs forces or not
-     * useful to know if it is an "intermediate" interaction 
-     * default: returns true
-     */
-    virtual bool outputsForces() const;
     
     /**
      * Interface to compute local interactions.
@@ -66,4 +58,41 @@ public:
      */
     virtual void halo(ParticleVector *pv1, ParticleVector *pv2, CellList *cl1,
                       CellList *cl2, cudaStream_t stream) = 0;
+
+
+    /// monitor activity of a channel
+    using ActivePredicate = std::function<bool()>;
+
+    /**
+     * describe the activity of a channel in an interaction
+     */
+    struct InteractionChannel
+    {
+        std::string name;
+        ActivePredicate active;
+    };
+
+    /**
+     * describe what channels are produced as intermediate output for another interaction
+     * default: nothing
+     */
+    virtual std::vector<InteractionChannel> getIntermediateOutputChannels() const;
+
+    /**
+     * describe what channels are needed as intermediate input fror another interaction
+     * default: nothing
+     */
+    virtual std::vector<InteractionChannel> getIntermediateInputChannels() const;
+    
+    /**
+     * describe what channels are produced by the interaction 
+     * default: forces, always active
+     */
+    virtual std::vector<InteractionChannel> getFinalOutputChannels() const;
+
+    static const ActivePredicate alwaysActive;
+    
+public:
+    /// Cut-off raduis
+    float rc;
 };

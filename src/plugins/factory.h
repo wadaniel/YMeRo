@@ -7,6 +7,9 @@
 #include "average_flow.h"
 #include "average_relative_flow.h"
 #include "channel_dumper.h"
+#include "outlet.h"
+#include "density_control.h"
+#include "displacement.h"
 #include "dump_mesh.h"
 #include "dump_obj_position.h"
 #include "dump_particles.h"
@@ -20,6 +23,7 @@
 #include "membrane_extra_force.h"
 #include "particle_channel_saver.h"
 #include "pin_object.h"
+#include "radial_velocity_control.h"
 #include "stats.h"
 #include "temperaturize.h"
 #include "velocity_control.h"
@@ -90,6 +94,62 @@ static pair_shared< AddTorquePlugin, PostprocessPlugin >
 createAddTorquePlugin(bool computeTask, const YmrState *state, std::string name, ParticleVector* pv, PyTypes::float3 torque)
 {
     auto simPl = computeTask ? std::make_shared<AddTorquePlugin> (state, name, pv->name, make_float3(torque)) : nullptr;
+    return { simPl, nullptr };
+}
+
+static pair_shared< DensityControlPlugin, PostprocessDensityControl >
+createDensityControlPlugin(bool computeTask, const YmrState *state, std::string name, std::string fname, std::vector<ParticleVector*> pvs,
+                           float targetDensity, std::function<float(PyTypes::float3)> region, PyTypes::float3 resolution,
+                           float levelLo, float levelHi, float levelSpace, float Kp, float Ki, float Kd,
+                           int tuneEvery, int dumpEvery, int sampleEvery)
+{
+    std::vector<std::string> pvNames;
+
+    if (computeTask) extractPVsNames(pvs, pvNames);
+    
+    auto simPl = computeTask ?
+        std::make_shared<DensityControlPlugin> (state, name, pvNames, targetDensity,
+                                                [region](float3 r) {return region(PyTypes::float3(r.x, r.y, r.z));},
+                                                make_float3(resolution), levelLo, levelHi, levelSpace,
+                                                Kp, Ki, Kd, tuneEvery, dumpEvery, sampleEvery) :
+        nullptr;
+
+    auto postPl = computeTask ?
+        nullptr :
+        std::make_shared<PostprocessDensityControl> (name, fname);
+    
+    return { simPl, postPl };
+}
+
+static pair_shared< DensityOutletPlugin, PostprocessPlugin >
+createDensityOutletPlugin(bool computeTask, const YmrState *state, std::string name, std::vector<ParticleVector*> pvs,
+                          float numberDensity, std::function<float(PyTypes::float3)> region, PyTypes::float3 resolution)
+{
+    std::vector<std::string> pvNames;
+
+    if (computeTask) extractPVsNames(pvs, pvNames);
+    
+    auto simPl = computeTask ?
+        std::make_shared<DensityOutletPlugin> (state, name, pvNames, numberDensity,
+                                               [region](float3 r) {return region(PyTypes::float3(r.x, r.y, r.z));},
+                                               make_float3(resolution) )
+        : nullptr;
+    return { simPl, nullptr };
+}
+
+static pair_shared< RateOutletPlugin, PostprocessPlugin >
+createRateOutletPlugin(bool computeTask, const YmrState *state, std::string name, std::vector<ParticleVector*> pvs,
+                       float rate, std::function<float(PyTypes::float3)> region, PyTypes::float3 resolution)
+{
+    std::vector<std::string> pvNames;
+
+    if (computeTask) extractPVsNames(pvs, pvNames);
+    
+    auto simPl = computeTask ?
+        std::make_shared<RateOutletPlugin> (state, name, pvNames, rate,
+                                            [region](float3 r) {return region(PyTypes::float3(r.x, r.y, r.z));},
+                                            make_float3(resolution) )
+        : nullptr;
     return { simPl, nullptr };
 }
 
@@ -262,10 +322,19 @@ createMembraneExtraForcePlugin(bool computeTask, const YmrState *state, std::str
 }
 
 static pair_shared< ParticleChannelSaverPlugin, PostprocessPlugin >
-createParticleChannelSaverPlugin(bool computeTask,  const YmrState *state, std::string name, ParticleVector *pv,
+createParticleChannelSaverPlugin(bool computeTask, const YmrState *state, std::string name, ParticleVector *pv,
                                  std::string channelName, std::string savedName)
 {
     auto simPl = computeTask ? std::make_shared<ParticleChannelSaverPlugin> (state, name, pv->name, channelName, savedName) : nullptr;
+    return { simPl, nullptr };
+}
+
+static pair_shared< ParticleDisplacementPlugin, PostprocessPlugin >
+createParticleDisplacementPlugin(bool computeTask, const YmrState *state, std::string name, ParticleVector *pv, int updateEvery)
+{
+    auto simPl = computeTask ?
+        std::make_shared<ParticleDisplacementPlugin> (state, name, pv->name, updateEvery) :
+        nullptr;
     return { simPl, nullptr };
 }
 
@@ -284,10 +353,10 @@ createPinObjPlugin(bool computeTask, const YmrState *state, std::string name, Ob
 }
 
 static pair_shared< SimulationVelocityControl, PostprocessVelocityControl >
-createSimulationVelocityControlPlugin(bool computeTask, const YmrState *state, std::string name, std::string filename, std::vector<ParticleVector*> pvs,
-                                      PyTypes::float3 low, PyTypes::float3 high,
-                                      int sampleEvery, int tuneEvery, int dumpEvery,
-                                      PyTypes::float3 targetVel, float Kp, float Ki, float Kd)
+createVelocityControlPlugin(bool computeTask, const YmrState *state, std::string name, std::string filename, std::vector<ParticleVector*> pvs,
+                            PyTypes::float3 low, PyTypes::float3 high,
+                            int sampleEvery, int tuneEvery, int dumpEvery,
+                            PyTypes::float3 targetVel, float Kp, float Ki, float Kd)
 {
     std::vector<std::string> pvNames;
     if (computeTask) extractPVsNames(pvs, pvNames);
@@ -301,6 +370,27 @@ createSimulationVelocityControlPlugin(bool computeTask, const YmrState *state, s
     auto postPl = computeTask ?
         nullptr :
         std::make_shared<PostprocessVelocityControl> (name, filename);
+
+    return { simPl, postPl };
+}
+
+static pair_shared< SimulationRadialVelocityControl, PostprocessRadialVelocityControl >
+createRadialVelocityControlPlugin(bool computeTask, const YmrState *state, std::string name, std::string filename, std::vector<ParticleVector*> pvs,
+                                  float minRadius, float maxRadius, int sampleEvery, int tuneEvery, int dumpEvery,
+                                  PyTypes::float3 center, float targetVel, float Kp, float Ki, float Kd)
+{
+    std::vector<std::string> pvNames;
+    if (computeTask) extractPVsNames(pvs, pvNames);
+        
+    auto simPl = computeTask ?
+        std::make_shared<SimulationRadialVelocityControl>(state, name, pvNames, minRadius, maxRadius, 
+                                                          sampleEvery, tuneEvery, dumpEvery,
+                                                          make_float3(center), targetVel, Kp, Ki, Kd) :
+        nullptr;
+
+    auto postPl = computeTask ?
+        nullptr :
+        std::make_shared<PostprocessRadialVelocityControl> (name, filename);
 
     return { simPl, postPl };
 }

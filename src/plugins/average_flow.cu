@@ -1,16 +1,17 @@
 #include "average_flow.h"
 
-#include <core/utils/kernel_launch.h>
-#include <core/simulation.h>
+#include "utils/sampling_helpers.h"
+#include "utils/simple_serializer.h"
+
+#include <core/celllist.h>
 #include <core/pvs/particle_vector.h>
 #include <core/pvs/views/pv.h>
-#include <core/celllist.h>
+#include <core/simulation.h>
 #include <core/utils/cuda_common.h>
+#include <core/utils/kernel_launch.h>
 
-#include "simple_serializer.h"
-#include "sampling_helpers.h"
-
-namespace average_flow_kernels {
+namespace AverageFlowKernels
+{
 
 __global__ void sample(
         PVview pvView, CellListInfo cinfo,
@@ -26,10 +27,10 @@ __global__ void sample(
 
     atomicAdd(avgDensity + cid, 1);
 
-    sampling_helpers_kernels::sampleChannels(pid, cid, channelsInfo);
+    SamplingHelpersKernels::sampleChannels(pid, cid, channelsInfo);
 }
 
-}
+} // namespace AverageFlowKernels
 
 int Average3D::getNcomponents(Average3D::ChannelType type) const
 {
@@ -65,9 +66,16 @@ void Average3D::setup(Simulation* simulation, const MPI_Comm& comm, const MPI_Co
 {
     SimulationPlugin::setup(simulation, comm, interComm);
 
+    rank3D   = simulation->rank3D;
+    nranks3D = simulation->nranks3D;
+    
     // TODO: this should be reworked if the domains are allowed to have different size
     resolution = make_int3( floorf(state->domain.localSize / binSize) );
     binSize = state->domain.localSize / make_float3(resolution);
+
+    if (resolution.x <= 0 || resolution.y <= 0 || resolution.z <= 0)
+    	die("Plugin '%s' has to have at least 1 cell per rank per dimension, got %dx%dx%d."
+    			"Please decrease the bin size", resolution.x, resolution.y, resolution.z);
 
     const int total = resolution.x * resolution.y * resolution.z;
 
@@ -112,7 +120,7 @@ void Average3D::sampleOnePv(ParticleVector *pv, cudaStream_t stream)
 
     const int nthreads = 128;
     SAFE_KERNEL_LAUNCH
-        (average_flow_kernels::sample,
+        (AverageFlowKernels::sample,
          getNblocks(pvView.size, nthreads), nthreads, 0, stream,
          pvView, cinfo, density.devPtr(), gpuInfo);
 }
@@ -121,7 +129,7 @@ static void accumulateOneArray(int n, int components, const float *src, double *
 {
     const int nthreads = 128;
     SAFE_KERNEL_LAUNCH
-        (sampling_helpers_kernels::accumulate,
+        (SamplingHelpersKernels::accumulate,
          getNblocks(n * components, nthreads), nthreads, 0, stream,
          n, components, src, dst);
 }
@@ -172,7 +180,7 @@ void Average3D::scaleSampled(cudaStream_t stream)
         int components = getNcomponents(channelsInfo.types[i]);
 
         SAFE_KERNEL_LAUNCH
-            (sampling_helpers_kernels::scaleVec,
+            (SamplingHelpersKernels::scaleVec,
              getNblocks(ncells, nthreads), nthreads, 0, stream,
              ncells, components, data.devPtr(), accumulated_density.devPtr() );
 
@@ -181,7 +189,7 @@ void Average3D::scaleSampled(cudaStream_t stream)
     }
 
     SAFE_KERNEL_LAUNCH(
-            sampling_helpers_kernels::scaleDensity,
+            SamplingHelpersKernels::scaleDensity,
             getNblocks(ncells, nthreads), nthreads, 0, stream,
             ncells, accumulated_density.devPtr(), 1.0 / (nSamples * binSize.x*binSize.y*binSize.z) );
 
@@ -206,13 +214,12 @@ void Average3D::serializeAndSend(cudaStream_t stream)
 
 void Average3D::handshake()
 {
-    std::vector<char> data;
     std::vector<int> sizes;
 
     for (auto t : channelsInfo.types)
         sizes.push_back(getNcomponents(t));
     
-    SimpleSerializer::serialize(data, simulation->nranks3D, simulation->rank3D, resolution, binSize, sizes, channelsInfo.names);
-    send(data);
+    SimpleSerializer::serialize(sendBuffer, nranks3D, rank3D, resolution, binSize, sizes, channelsInfo.names);
+    send(sendBuffer);
 }
 

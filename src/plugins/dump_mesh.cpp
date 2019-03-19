@@ -1,12 +1,12 @@
 #include "dump_mesh.h"
-#include "simple_serializer.h"
-#include <core/utils/folders.h>
+#include "utils/simple_serializer.h"
 
-#include <core/simulation.h>
-#include <core/pvs/particle_vector.h>
-#include <core/pvs/object_vector.h>
 #include <core/celllist.h>
+#include <core/pvs/object_vector.h>
+#include <core/pvs/particle_vector.h>
+#include <core/simulation.h>
 #include <core/utils/cuda_common.h>
+#include <core/utils/folders.h>
 
 #include <regex>
 
@@ -47,11 +47,11 @@ void MeshPlugin::serializeAndSend(cudaStream_t stream)
     auto& mesh = ov->mesh;
 
     waitPrevSend();
-    SimpleSerializer::serialize(data, ov->name,
+    SimpleSerializer::serialize(sendBuffer, ov->name,
                                 mesh->getNvertices(), mesh->getNtriangles(), mesh->triangles,
                                 vertices);
 
-    send(data);
+    send(sendBuffer);
 }
 
 //=================================================================================

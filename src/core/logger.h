@@ -86,6 +86,8 @@ public:
         fout = fopen( (start+"_"+rankStr+end).c_str(), "w");
 
         setDebugLvl(debugLvl);
+
+        register_signals();
     }
 
     /**
@@ -225,7 +227,7 @@ public:
     {
         if (code != MPI_SUCCESS)
         {
-            char buf[2000];
+            char buf[MPI_MAX_ERROR_STRING];
             int nchar;
             MPI_Error_string(code, buf, &nchar);
 

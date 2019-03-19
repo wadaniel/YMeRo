@@ -9,22 +9,22 @@
 Overview
 ##########
 
-This section describes the YMeRo interface and introduces the reader to installing and running the code.
+This section describes the YMeRo (from Greek: computational "ypologistikí" micro "mikro" fluidics "ygró") interface and shows the reader how to install and run the code.
 
 The YMeRo code is designed as a classical molecular dynamics code adapted for inclusion of rigid bodies and cells.
-The simulation consists of multiple time-steps during which the particles and bodies will be displaces following laws of mechanics and hydrodynamics.
-One time-step roughly consists of the following steps:
+The simulation consists of multiple time-steps during which the particles and bodies will be displaced following the laws of mechanics and hydrodynamics.
+One time-step includes following tasks:
 
-* compute all the forces in the system, which are mostly pairwise forces between different particles,
-* move the particles by integrating the equations of motions,
-* bounce particles off the wall surfaces so that they cannot penetrate the wall even in case of soft-core interactions,
+* compute all forces in the system, which are mainly pairwise forces between particles,
+* integrate the equations of motions and move the particles,
+* bounce particles off the wall surfaces such that they cannot penetrate walls even in case of soft-core interactions,
 * bounce particles off the bodies (i.e. rigid bodies and elastic membranes),
 * perform additional operations dictated by plug-ins (modifications, statistics, data dumps, etc.).
 
 Python interface
 *****************
 
-The code uses Python scripting language for the simulation setup.
+The code uses Python for the simulation setup.
 The script defines simulation domain, number of MPI ranks to run; data containers, namely :ref:`user-pv` and data handlers: 
 :ref:`user-ic`, :ref:`user-integrators`, :ref:`user-interactions`, :ref:`user-walls`, :ref:`user-bouncers`, :ref:`user-belongers` and :ref:`user-plugins`.
 
@@ -90,7 +90,7 @@ YMeRo is intended to be executed within MPI environments, e.g.:
 
 .. code-block:: bash
 
-    mpirun -np 12 python3 script.py
+    mpirun -np 2 python3 script.py
 
 The code employs simple domain decomposition strategy (see :any:`ymero`) with the work
 mapping fixed in the beginning of the simulation.
@@ -102,7 +102,7 @@ mapping fixed in the beginning of the simulation.
 
 .. note::
      Recommended strategy is to place two tasks per single compute node with one GPU or 2 tasks
-     per one GPU in multi-GPU configuration. The postprocessing tasks will not use any GPU calls,
+     per GPU in multi-GPU configuration. The postprocessing tasks will not use any GPU calls,
      so you may not need multiprocess GPU mode or MPS.
 
 .. note::

@@ -98,7 +98,7 @@ Tools
 *****
 
 Additional helper tools can be installed for convenience.
-They are required for testing the code.
+The tools will automatically load required modules for installing, running and testing the code.
 
    .. code-block:: console
         
@@ -126,7 +126,6 @@ They are required for testing the code.
       The default value is ``mpiexec``
 
 
-The tools will automatically load modules for installing, running and testing the code.
 The modules and CMAKE flags can be customised by adding corresponding files in ``tools/config`` (see available examples).
 The ``__default`` files can be modified accordingly to your system.
 
